@@ -148,7 +148,8 @@ if (connectionCount === 1) {
   })
 })
 
-server.listen(3001, async () => {
+const PORT = process.env.PORT || 3001;
+server.listen(PORT, async () => {
   //Clear status data on redis
   await redis.del('users_online')
   const keys = await redis.keys('connections:*')
@@ -157,5 +158,6 @@ server.listen(3001, async () => {
     await redis.del(...keys)
   }
 
-  console.log('Servidor WebSocket rodando em http://localhost:3001')
+  console.log(`Servidor WebSocket rodando na porta ${PORT}`);
 })
+
