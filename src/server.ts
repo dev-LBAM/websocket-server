@@ -2,7 +2,6 @@ import express from 'express'
 import http from 'http'
 import { Server, Socket } from 'socket.io'
 import cookieParser from 'cookie-parser'
-import jwt from 'jsonwebtoken'
 import dotenv from 'dotenv'
 import { connectToDB } from './db/mongodb'
 import User from './db/schemas/user'
@@ -29,6 +28,7 @@ declare module 'socket.io'
     userId: string
     name: string
     profileImg: string
+    username: string
   }
 }
 
@@ -38,12 +38,13 @@ io.use(async (socket: Socket, next) => {
     await connectToDB()
     const userId = socket.handshake.auth.userId
 
-    const user = await User.findById(userId).select('name profileImg userId')
+    const user = await User.findById(userId).select('name username profileImg userId')
     if (!user) return next(new Error('User not found'))
 
     socket.userId = user._id
     socket.name = user.name
     socket.profileImg = user.profileImg
+    socket.username = user.username
     next()
   } catch (err) {
     console.error('Auth middleware error:', err)
@@ -64,9 +65,10 @@ if (connectionCount === 1) {
     userId: socket.userId,
     socketId: socket.id,
     name: socket.name,
-    profileImg: socket.profileImg
+    profileImg: socket.profileImg,
+    username: socket.username,
+    loggedAt: new Date(Date.now())
   }))}
-
 
   const { usersOnline, usersOffline } = await getMutualFollowerService(socket.userId);
 
@@ -76,8 +78,10 @@ if (connectionCount === 1) {
     socket.to(user.socketId).emit('mutual_follower_login', {
     _id: socket.userId,
     name: socket.name,
+    username: socket.username,
     profileImg: socket.profileImg,
-    lastSeen: null
+    lastSeen: null,
+    loggedAt: new Date(Date.now())
     });
   }
 
@@ -93,23 +97,53 @@ if (connectionCount === 1) {
     socket.emit('mutual_followers_offline', usersOffline);
   }
 
+  socket.on('private_message', async (message) => {
+    const { receiverId } = message;
+
+    if (!receiverId) return;
+    const userJson = await redis.hget('users_online', receiverId);
+
+    if (!userJson) {
+      console.log(`❌ Usuário ${receiverId} não está online`);
+      return;
+    }
+
+const receiverSocket = JSON.parse(userJson);
+const receiverSocketId = receiverSocket.socketId;
+    console.log(`📨 Mensagem recebida do ${message.senderId} para ${receiverId}`);
+
+    socket.to(receiverSocketId).emit('chat_message', message);
+  });
+
+  socket.on("typing", async ({ senderId, receiverId }) => {
+        if (!receiverId) return;
+    const userJson = await redis.hget('users_online', receiverId);
+
+    if (!userJson) {
+      console.log(`❌ Usuário ${receiverId} não está online`);
+      return;
+    }
+    const receiverSocket = JSON.parse(userJson);
+    const receiverSocketId = receiverSocket.socketId;
+  socket.to(receiverSocketId).emit("user_typing", { senderId });
+});
   // When user disconnect
   socket.on('disconnect', async () => 
   {
     const remaining = await redis.decr(`connections:${socket.userId}`);
 
-    // Se ainda tiver outras conexões abertas, não considera offline
     if (remaining > 0) return;
   
-    // Remove de online
     await redis.hdel('users_online', socket.userId);
     await redis.del(`connections:${socket.userId}`);
 
     
-    const userLogout = await User.findByIdAndUpdate(socket.userId, 
+const userLogout = await User.findByIdAndUpdate(socket.userId, 
     {
       lastSeen: new Date()
-    })
+    }, 
+    { new: true }
+);
 
     const { usersOnline } = await getMutualFollowerService(socket.userId);
 
@@ -119,6 +153,7 @@ if (connectionCount === 1) {
       io.to(user.socketId).emit('mutual_follower_logout', {
         _id: String(userLogout._id),
         name: userLogout.name,
+        username: userLogout.username,
         profileImg: userLogout.profileImg,
         lastSeen: userLogout.lastSeen
       });

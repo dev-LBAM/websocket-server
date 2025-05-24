@@ -20,7 +20,7 @@ export async function getMutualFollowerService(userId: string)
   }
 
   const mutualUsers = await User.find({ _id: { $in: mutualIds } })
-    .select('_id name profileImg lastSeen')
+    .select('_id name username profileImg lastSeen')
     .lean()
 
   const mutualMap = new Map(mutualUsers.map(user => [String(user._id), user]))
@@ -28,14 +28,17 @@ export async function getMutualFollowerService(userId: string)
   const usersOnline: {
     _id: string
     name: string
+    username: string
     profileImg: string
     lastSeen: Date
     socketId: string
+    loggedAt: Date
   }[] = []
 
   const usersOffline: {
     _id: string
     name: string
+    username:string
     profileImg: string
     lastSeen: Date
   }[] = []
@@ -51,14 +54,17 @@ export async function getMutualFollowerService(userId: string)
       usersOnline.push({
         _id: String(userData._id),
         name: userData.name,
+        username: userData.username,
         profileImg: userData.profileImg,
         lastSeen: userData.lastSeen,
-        socketId: redisData.socketId
+        socketId: redisData.socketId,
+        loggedAt: redisData.loggedAt
       })
     } else {
       usersOffline.push({
         _id: String(userData._id),
         name: userData.name,
+        username: userData.username,
         profileImg: userData.profileImg,
         lastSeen: userData.lastSeen
       })
